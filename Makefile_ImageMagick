@@ -6,6 +6,10 @@ BZIP2_VERSION ?= 1.0.6
 LIBWEBP_VERSION ?= 0.6.1
 IMAGEMAGICK_VERSION ?= 7.0.8-45
 
+FONTCONFIG_VERSION ?= 2.13.0
+FREETYPE_VERSION ?= 2.10.0
+HARFBUZZ_VERSION ?= 2.4.0
+
 TARGET_DIR ?= /opt/
 PROJECT_ROOT = $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 CACHE_DIR=$(PROJECT_ROOT)build/cache
@@ -113,6 +117,63 @@ $(CACHE_DIR)/lib/libopenjp2.a: $(OPENJP2_SOURCE) $(CACHE_DIR)/lib/libpng.a $(CAC
 	make clean
 	make install
 
+FREETYPE_SOURCE=freetype-$(FREETYPE_VERSION).tar.gz
+LIBFREETYPE=$(CACHE_DIR)/lib/libfreetype.a
+HARFBUZZ_SOURCE=harfbuzz-$(HARFBUZZ_VERSION).tar.bz2
+LIBHARFBUZZ=$(CACHE_DIR)/lib/libharfbuzz.a
+
+$(FREETYPE_SOURCE):
+	curl -k -LO https://download.savannah.gnu.org/releases/freetype/$(FREETYPE_SOURCE)
+
+$(HARFBUZZ_SOURCE):
+	curl -LO https://www.freedesktop.org/software/harfbuzz/release/$(HARFBUZZ_SOURCE)
+
+FT_WITHOUT_HB_DIR=$(PROJECT_ROOT)build/freetype-$(FREETYPE_VERSION)-without-harfbuzz
+FT_WITHOUT_HB=$(FT_WITHOUT_HB_DIR)/objs/.libs/libfreetype.a
+
+$(FT_WITHOUT_HB): $(FREETYPE_SOURCE)
+	tar xf $< -C /tmp
+	rm -rf $(FT_WITHOUT_HB_DIR)
+	mv /tmp/freetype-$(FREETYPE_VERSION) $(FT_WITHOUT_HB_DIR)
+	cd $(FT_WITHOUT_HB_DIR)
+	$(CONFIGURE) --without-harfbuzz
+	make
+	make install
+
+$(LIBHARFBUZZ): $(HARFBUZZ_SOURCE) $(FT_WITHOUT_HB)
+	tar xf $<
+	cd harfbuzz-$(HARFBUZZ_VERSION)
+	$(CONFIGURE) \
+		--with-freetype
+	make
+	make install
+
+$(LIBFREETYPE): $(FREETYPE_SOURCE) $(GLIB) $(LIBPNG) $(LIBBZ2) $(LIBHARFBUZZ)
+	tar xf $<
+	cd freetype-$(FREETYPE_VERSION)
+	$(CONFIGURE) \
+		--with-harfbuzz \
+		--with-png \
+		--with-bzip2
+	yum install -y gperf
+	make distclean clean
+	make
+	make install
+
+## fontconfig
+
+FONTCONFIG_SOURCE=fontconfig-$(FONTCONFIG_VERSION).tar.bz2
+LIBFONTCONFIG=$(CACHE_DIR)/lib/libfontconfig.a
+
+$(FONTCONFIG_SOURCE):
+	curl -LO https://www.freedesktop.org/software/fontconfig/release/$(FONTCONFIG_SOURCE)
+
+fontconfig $(LIBFONTCONFIG): $(FONTCONFIG_SOURCE) $(LIBXML2) $(LIBFREETYPE) $(LIBUUID)
+	tar xf $<
+	cd fontconfig-$(FONTCONFIG_VERSION)
+	$(CONFIGURE) --enable-libxml2
+	make
+	make install
 
 ## ImageMagick
 
@@ -127,7 +188,10 @@ LIBS:=$(CACHE_DIR)/lib/libjpeg.a \
 	$(CACHE_DIR)/lib/libopenjp2.a \
 	$(CACHE_DIR)/lib/libtiff.a \
 	$(CACHE_DIR)/lib/libbz2.a \
-	$(CACHE_DIR)/lib/libwebp.a
+	$(CACHE_DIR)/lib/libwebp.a \
+	$(CACHE_DIR)/lib/libfreetype.a \
+	$(CACHE_DIR)/lib/libharfbuzz.a \
+	$(CACHE_DIR)/lib/libfontconfig.a
 
 $(TARGET_DIR)/bin/identify: $(IMAGE_MAGICK_SOURCE) $(LIBS)
 	tar xf $<
